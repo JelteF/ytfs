@@ -10,8 +10,9 @@ from .stor import YTStor, YTMetaStor
 from copy import copy, deepcopy
 from collections import OrderedDict
 from urllib.parse import urlencode
+from easyfuse import Directory, File
 
-class YTActions():
+class YTActions(Directory):
 
     """
     Class responsible for searching in YouTube service and holding information about search results.
@@ -60,7 +61,9 @@ class YTActions():
         }
     }
 
-    def __init__(self, search_query):
+    def __init__(self, search_query, *args, **kwargs):
+
+        super().__init__(search_query, *args, **kwargs)
 
         if not isinstance(search_query, str):
             raise ValueError("Expected str for 1st parameter (search_query).")
@@ -385,7 +388,7 @@ class YTActions():
 
         return arg in self.visible_files or (self.adj_tokens[0] is not None and arg == " prev") or (self.adj_tokens[0] is None and self.adj_tokens[1] is not None and arg == " next")
 
-    def updateResults(self, forward=None):
+    def refresh_children(self, forward=None):
 
         """
         Reload search results or load another "page".
@@ -395,11 +398,18 @@ class YTActions():
         forward : bool or None, optional
             Whether move forwards or backwards (``True`` or ``False``). If ``None``, then first page is loaded.
         """
+        super().refresh_children()
+
+        def get_name(i):
+            return i['snippet']['title'].replace('/', '\\')
 
         # this choses data we need.
         files = lambda x: {
-            i['snippet']['title'].replace('/', '\\'): YTStor(
+            get_name(i): YTStor(
                 {'yid': i['id']['videoId'], 'pub_date': i['snippet']['publishedAt']},
+                get_name(i),
+                self.fs,
+                self,
                 opts=self.yts_opts) for i in x['items']
         }
         descs = lambda x: {

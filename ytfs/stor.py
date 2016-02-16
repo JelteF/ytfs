@@ -15,6 +15,8 @@ from io import BytesIO
 
 from .range_t import range_t
 
+from easyfuse import Directory, File
+
 class Downloader():
 
     """
@@ -39,7 +41,7 @@ class Downloader():
             Two element tuple that represents a data range - compliant with ``range_t`` subrange definition.
         fh : int
             Descriptor used by a process for filesystem operations.
-        
+
         Returns
         -------
         None
@@ -97,7 +99,7 @@ class Downloader():
                 yts.processing_range -= needed_range
 
 
-class YTStor():
+class YTStor(File):
 
     """
     ``YTStor`` - the heart of YTFS. Class responsible for obtaining and storing data and information about a movie of
@@ -151,7 +153,9 @@ class YTStor():
 
     rickastley = False
 
-    def __init__(self, init_data, opts=dict()):
+    def __init__(self, init_data, *args, opts=dict(), **kwargs):
+        super().__init__(*args, **kwargs)
+        print('blaa')
 
         yid = init_data['yid'] # it must be here.
 
@@ -174,6 +178,7 @@ class YTStor():
         self.filesize = 4096
         self.disk = 0
         self.extension = ".mp4" # FIXME
+        return
 
         self.atime = int(time())
         try:

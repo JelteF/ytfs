@@ -155,7 +155,7 @@ class range_t():
         bool
             ``True`` if **whole** examined range is present in object. Otherwise ``False``.
         """
-        
+
         conv = self.__val_convert(val) # conversion
         return self.contains(val) == conv[1] - conv[0]
 
@@ -174,7 +174,7 @@ class range_t():
         set
             Set of overlapping subranges.
         """
-        
+
         conv = self.__val_convert(val) # conversion
 
         return self.__match_l(conv, self.__has)
@@ -263,7 +263,7 @@ class range_t():
 
         """
         Substracting support.
-        
+
         Parameters
         ----------
         val : int or tuple or list or range

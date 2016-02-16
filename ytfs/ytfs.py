@@ -17,10 +17,14 @@ from time import time
 from argparse import ArgumentParser, HelpFormatter
 from functools import wraps
 
-from fuse import FUSE, FuseOSError, Operations
+import llfuse
+from llfuse import FUSEError
+from easyfuse import Operations
 
 #from stor import YTStor
 from .actions import YTActions, YTStor, YTMetaStor
+
+import logging
 
 
 #######################
@@ -28,7 +32,7 @@ from .actions import YTActions, YTStor, YTMetaStor
 #######################
 
 from ctypes import create_string_buffer, memmove
-
+"""
 def listxattr_FIX(self, path, namebuf, size):
     attrs = self.operations('listxattr', path.decode(self.encoding)) or ''
     ret = '\x00'.join(attrs).encode(self.encoding) + '\x00'.encode('ascii') # <= fixed here
@@ -59,7 +63,7 @@ def flush_FIX(self, path, fip): # if feel bad...
     return self.operations('flush', path.decode(self.encoding), fh)
 
 FUSE.flush = flush_FIX # It's just wrong...
-
+"""
 #######################
 
 
@@ -104,10 +108,10 @@ class YTFS(Operations):
     ----------
     st : dict
         Dictionary that contains basic file attributes. Consult ``man 2 stat`` for reference.
-    searches : dict
-        Dictionary that is a main interface to data of idividual searches and their results (movies) stored by
+    fs : dict
+        Dictionary that is a main interface to data of idividual fs and their results (movies) stored by
         filesystem. Format:
-          searches = {
+          fs = {
               'search phrase 1':  YTActions({
                                        'tytul1': <YTStor obj>,
                                        'tytul2': <YTStor obj>,
@@ -146,8 +150,9 @@ class YTFS(Operations):
     __sh_script = b"#!/bin/sh\necho 1 > $0\n"
 
     def __init__(self):
+        super().__init__()
+        self.dir_class = YTActions
 
-        self.searches = dict()
         self.fds = fd_dict()
 
     class PathType(Enum):
@@ -297,8 +302,8 @@ class YTFS(Operations):
         except TypeError:
             pass
 
-        return ((not p[0] and not p[1]) or (p[0] in self.searches and not p[1]) or (p[0] in self.searches and
-            p[1] in self.searches[p[0]]))
+        return ((not p[0] and not p[1]) or (p[0] in self.fs and not p[1]) or (p[0] in self.fs and
+            p[1] in self.fs[p[0]]))
 
     def _pathdec(method):
 
@@ -323,12 +328,12 @@ class YTFS(Operations):
                 return method(self, self.__pathToTuple(path), *args)
 
             except YTFS.PathConvertError:
-                raise FuseOSError(errno.EINVAL)
+                raise FUSEError(errno.EINVAL)
 
         return mod
 
     @_pathdec
-    def getattr(self, tid, fh=None):
+    def old_getattr(self, tid, fh=None):
 
         """
         File attributes.
@@ -347,7 +352,7 @@ class YTFS(Operations):
         """
 
         if not self.__exists(tid):
-            raise FuseOSError(errno.ENOENT)
+            raise FUSEError(errno.ENOENT)
 
         pt = self.PathType.get(tid)
 
@@ -360,11 +365,11 @@ class YTFS(Operations):
             st['st_mode'] = stat.S_IFREG | 0o444
             st['st_nlink'] = 1
 
-            st['st_size'] = self.searches[ tid[0] ][ tid[1] ].filesize
+            st['st_size'] = self.fs[ tid[0] ][ tid[1] ].filesize
 
-            st['st_ctime'] = self.searches[ tid[0] ][ tid[1] ].ctime
+            st['st_ctime'] = self.fs[ tid[0] ][ tid[1] ].ctime
             st['st_mtime'] = st['st_ctime']
-            st['st_atime'] = self.searches[ tid[0] ][ tid[1] ].atime
+            st['st_atime'] = self.fs[ tid[0] ][ tid[1] ].atime
 
         elif pt is self.PathType.ctrl:
 
@@ -380,7 +385,7 @@ class YTFS(Operations):
         return st
 
     @_pathdec
-    def readdir(self, tid, fh):
+    def old_readdir(self, tid, fh):
 
         """
         Read directory contents. Lists visible elements of ``YTActions`` object.
@@ -402,24 +407,24 @@ class YTFS(Operations):
         pt = self.PathType.get(tid)
         try:
             if pt is self.PathType.main:
-                ret = list(self.searches)
+                ret = list(self.fs)
 
             elif pt is self.PathType.subdir:
-                ret = list(self.searches[tid[0]])
+                ret = list(self.fs[tid[0]])
 
             elif pt is self.PathType.file:
-                raise FuseOSError(errno.ENOTDIR)
+                raise FUSEError(errno.ENOTDIR)
 
             else:
-                raise FuseOSError(errno.ENOENT)
+                raise FUSEError(errno.ENOENT)
 
         except KeyError:
-            raise FuseOSError(errno.ENOENT)
+            raise FUSEError(errno.ENOENT)
 
         return ['.', '..'] + ret
 
     @_pathdec
-    def mkdir(self, tid, mode):
+    def old_mkdir(self, tid, mode):
 
         """
         Directory creation. Search is performed.
@@ -435,23 +440,23 @@ class YTFS(Operations):
         pt = self.PathType.get(tid)
 
         if pt is self.PathType.invalid or pt is self.PathType.file:
-            raise FuseOSError(errno.EPERM)
+            raise FUSEError(errno.EPERM)
 
         if self.__exists(tid):
-            raise FuseOSError(errno.EEXIST)
+            raise FUSEError(errno.EEXIST)
 
         try:
             dir_ent = YTActions(tid[0])
             dir_ent.updateResults()
         except ConnectionError:
-            raise FuseOSError(errno.ENETDOWN)
+            raise FUSEError(errno.ENETDOWN)
 
-        self.searches[tid[0]] = dir_ent # now adding directory entry is legit, nothing failed.
+        self.fs[tid[0]] = dir_ent # now adding directory entry is legit, nothing failed.
 
         return 0
 
     @_pathdec
-    def rename(self, old, new):
+    def old_rename(self, old, new):
 
         """
         Directory renaming support. Needed because many file managers create directories with default names, wich
@@ -469,32 +474,32 @@ class YTFS(Operations):
         new = self.__pathToTuple(new)
 
         if not self.__exists(old):
-            raise FuseOSError(errno.ENOENT)
+            raise FUSEError(errno.ENOENT)
 
         if self.PathType.get(old) is not self.PathType.subdir or self.PathType.get(new) is not self.PathType.subdir:
-            raise FuseOSError(errno.EPERM)
+            raise FUSEError(errno.EPERM)
 
         if self.__exists(new):
-            raise FuseOSError(errno.EEXIST)
+            raise FUSEError(errno.EEXIST)
 
         try:
             new_dir_ent = YTActions(new[0])
             new_dir_ent.updateResults()
         except ConnectionError:
-            raise FuseOSError(errno.ENETDOWN)
+            raise FUSEError(errno.ENETDOWN)
 
-        self.searches[new[0]] = new_dir_ent # as in mkdir
+        self.fs[new[0]] = new_dir_ent # as in mkdir
 
         try:
-            del self.searches[old[0]]
+            del self.fs[old[0]]
 
         except KeyError:
-            raise FuseOSError(errno.ENOENT)
+            raise FUSEError(errno.ENOENT)
 
         return 0
 
     @_pathdec
-    def rmdir(self, tid):
+    def old_rmdir(self, tid):
 
         """
         Directory removal. ``YTActions`` object under `tid` is told to clean all data, and then it is deleted.
@@ -508,21 +513,21 @@ class YTFS(Operations):
         pt = self.PathType.get(tid)
 
         if pt is self.PathType.main:
-            raise FuseOSError(errno.EINVAL)
+            raise FUSEError(errno.EINVAL)
         elif pt is not self.PathType.subdir:
-            raise FuseOSError(errno.ENOTDIR)
+            raise FUSEError(errno.ENOTDIR)
 
         try:
-            self.searches[tid[0]].clean()
-            del self.searches[tid[0]]
+            self.fs[tid[0]].clean()
+            del self.fs[tid[0]]
 
         except KeyError:
-            raise FuseOSError(errno.ENOENT)
+            raise FUSEError(errno.ENOENT)
 
         return 0
 
     @_pathdec
-    def unlink(self, tid):
+    def old_unlink(self, tid):
 
         """
         File removal. In fact nothing is deleted, but for correct ``rm -r`` handling we deceive shell, that function
@@ -537,7 +542,7 @@ class YTFS(Operations):
         return 0
 
     @_pathdec
-    def open(self, tid, flags):
+    def old_open(self, tid, flags):
 
         """
         File open. ``YTStor`` object associated with this file is initialised and written to ``self.fds``.
@@ -558,16 +563,16 @@ class YTFS(Operations):
         pt = self.PathType.get(tid)
 
         if pt is not self.PathType.file and pt is not self.PathType.ctrl:
-            raise FuseOSError(errno.EINVAL)
+            raise FUSEError(errno.EINVAL)
 
         if pt is not self.PathType.ctrl and (flags & os.O_WRONLY or flags & os.O_RDWR):
-            raise FuseOSError(errno.EPERM)
+            raise FUSEError(errno.EPERM)
 
         if not self.__exists(tid):
-            raise FuseOSError(errno.ENOENT)
+            raise FUSEError(errno.ENOENT)
 
         try:
-            yts = self.searches[tid[0]][tid[1]]
+            yts = self.fs[tid[0]][tid[1]]
 
         except KeyError:
             return self.fds.push(None) # for control file no association is needed.
@@ -575,7 +580,7 @@ class YTFS(Operations):
         try:
             obI = yts.obtainInfo() # network may fail
         except ConnectionError:
-            raise FuseOSError(errno.ENETDOWN)
+            raise FUSEError(errno.ENETDOWN)
 
         if obI:
             fh = self.fds.push(yts)
@@ -583,14 +588,14 @@ class YTFS(Operations):
             try:
                 yts.registerHandler(fh)
             except ConnectionError:
-                raise FuseOSError(errno.ENETDOWN)
+                raise FUSEError(errno.ENETDOWN)
 
             return fh
         else:
-            raise FuseOSError(errno.EINVAL)
+            raise FUSEError(errno.EINVAL)
 
     @_pathdec
-    def read(self, tid, length, offset, fh):
+    def old_read(self, tid, length, offset, fh):
 
         """
         Read from a file. Data is obtained from ``YTStor`` object (which is kept under `fh` descriptor) using its
@@ -623,19 +628,19 @@ class YTFS(Operations):
             elif tid[1] == " prev":
                 d = False
             else:
-                raise FuseOSError(errno.EINVAL)
+                raise FUSEError(errno.EINVAL)
 
             return self.__sh_script[offset:offset+length]
 
         except KeyError: # descriptor does not exist.
-            raise FuseOSError(errno.EBADF)
+            raise FUSEError(errno.EBADF)
 
         except ConnectionError:
-            raise FuseOSError(errno.ESTALE)
+            raise FUSEError(errno.ESTALE)
 
-    def truncate(*args): return 0 # throws EROFS by default, so write fails.
+    def old_truncate(*args): return 0 # throws EROFS by default, so write fails.
     @_pathdec
-    def write(self, tid, data, offset, fh):
+    def old_write(self, tid, data, offset, fh):
 
         """
         Write operation. Applicable only for control files - updateResults is called.
@@ -662,19 +667,19 @@ class YTFS(Operations):
         elif tid[1] == " prev":
             d = False
         else:
-            raise FuseOSError(errno.EPERM)
+            raise FUSEError(errno.EPERM)
 
         try:
-            self.searches[tid[0]].updateResults(d)
+            self.fs[tid[0]].updateResults(d)
         except KeyError:
-            raise FuseOSError(errno.EINVAL) # sth went wrong...
+            raise FUSEError(errno.EINVAL) # sth went wrong...
         except ConnectionError:
-            raise FuseOSError(errno.ENETDOWN)
+            raise FUSEError(errno.ENETDOWN)
 
         return len(data)
 
     @_pathdec
-    def release(self, tid, fh):
+    def old_release(self, tid, fh):
 
         """
         Close file. Descriptor is removed from ``self.fds``.
@@ -697,7 +702,7 @@ class YTFS(Operations):
             del self.fds[fh]
 
         except KeyError:
-            raise FuseOSError(errno.EBADF)
+            raise FUSEError(errno.EBADF)
 
         return 0
 
@@ -721,8 +726,21 @@ def main():
 
     avgrp.add_argument('-o', choices=['date', 'rating', 'relevance', 'title', 'viewCount'], default='relevance',
                         help='Specify the method that will be used to order resources. Values: `date`, `rating`, `relevance`, `title` and `viewCount`. Default is relevance.')
+    avgrp.add_argument('--log', default='INFO', help='loglevel')
 
     x = parser.parse_args()
+
+    args = vars(x)
+
+    loglevel = getattr(logging, args['log'].upper(), None)
+
+    if not isinstance(loglevel, int):
+        raise ValueError('Invalid log level: %s' % args['log'])
+
+    logging.basicConfig(level=loglevel, format='[%(levelname)s] %(message)s')
+
+    del args['log']
+
 
     if x.a:
         YTStor.preferences['audio'] = True
@@ -747,6 +765,10 @@ def main():
 
     print("Mounting YTFS ver. " + __version__ + ".\nIf you encounter any bugs, please open an issue on GitHub: https://github.com/rasguanabana/ytfs")
 
-    FUSE(YTFS(), x.mountpoint[0], foreground=x.d)
+    llfuse.init(YTFS(), x.mountpoint[0], [])
+    try:
+        llfuse.main(workers=1)
+    finally:
+        llfuse.close()
 
 if __name__ == '__main__': main()
