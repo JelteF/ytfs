@@ -406,9 +406,9 @@ class YTActions(Directory):
         # this choses data we need.
         files = lambda x: {
             get_name(i): YTStor(
-                {'yid': i['id']['videoId'], 'pub_date': i['snippet']['publishedAt']},
+                {'yid': i['id']['videoId'],
+                 'pub_date': i['snippet']['publishedAt']},
                 get_name(i),
-                self.fs,
                 self,
                 opts=self.yts_opts) for i in x['items']
         }

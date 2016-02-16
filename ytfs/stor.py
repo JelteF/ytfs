@@ -153,9 +153,9 @@ class YTStor(File):
 
     rickastley = False
 
-    def __init__(self, init_data, *args, opts=dict(), **kwargs):
-        super().__init__(*args, **kwargs)
-        print('blaa')
+    def __init__(self, init_data, name, *args, opts=dict(), **kwargs):
+        super().__init__(name + '.mp4', *args, **kwargs)
+        self.dirty = False
 
         yid = init_data['yid'] # it must be here.
 
@@ -178,14 +178,13 @@ class YTStor(File):
         self.filesize = 4096
         self.disk = 0
         self.extension = ".mp4" # FIXME
-        return
 
-        self.atime = int(time())
+        self.st_atime = int(time())
         try:
             # convert from iso 8601
-            self.ctime = timegm(datetime.strptime(init_data['pub_date'], "%Y-%m-%dT%H:%M:%S.%fZ").timetuple())
+            self.st_ctime = timegm(datetime.strptime(init_data['pub_date'], "%Y-%m-%dT%H:%M:%S.%fZ").timetuple())
         except KeyError:
-            self.ctime = self.atime
+            self.st_ctime = self.st_atime
 
         self.r_session = requests.Session()
 
